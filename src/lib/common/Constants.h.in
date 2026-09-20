@@ -28,6 +28,8 @@ const auto kServerGridWidth = 5;
 
 #ifdef _WIN32
 
+inline constexpr wchar_t kAppNameW[] = L"@CMAKE_PROJECT_PROPER_NAME@";
+
 // clang-format off
 const auto kWindowsRuntimeMajor = @REQUIRED_MSVC_RUNTIME_MAJOR@;
 const auto kWindowsRuntimeMinor = @REQUIRED_MSVC_RUNTIME_MINOR@;
