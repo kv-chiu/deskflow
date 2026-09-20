@@ -1,0 +1,106 @@
+name: Package Portable Deskflow
+
+on:
+  push:
+    branches:
+      - 'codex/**'
+      - 'master'
+  workflow_dispatch:
+    inputs:
+      build_master_from_source:
+        description: 'Compile master from source instead of fetching official continuous build'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PACKAGE_PREFIX: "deskflow"
+  CMAKE_CONFIGURE: "cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DSKIP_BUILD_TESTS=ON -DCMAKE_COMPILE_WARNING_AS_ERROR=ON"
+
+jobs:
+  build-portable:
+    name: Build & Package Portable (x64)
+    runs-on: windows-2022
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out current branch (Fix)
+        uses: sithlord48/fancy-checkout@v2
+
+      - name: Setup VC++ environment
+        uses: TheMrMilchmann/setup-msvc-dev@v4
+        with:
+          arch: amd64
+          spectre: true
+
+      - name: Install dependencies
+        id: get-deps
+        uses: ./.github/actions/install-dependencies
+        with:
+          qt-version: 6.11.2
+          vcpkg-triplet: x64-windows-release
+
+      - name: Get version
+        uses: ./.github/actions/get-version
+
+      - name: Configure CMake
+        run: |
+          ${{ env.CMAKE_CONFIGURE }} -G Ninja ${{ steps.get-deps.outputs.vcpkg-cmake-config }} -DPACKAGE_VERSION_LABEL="${{ env.DESKFLOW_PACKAGE_VERSION }}"
+
+      - name: Build and Package (Fix Branch)
+        shell: bash
+        run: |
+          cmake --build build --config Release -j8 --target package
+
+      - name: Prepare Artifact Directory
+        shell: bash
+        run: |
+          mkdir -p artifacts-out
+          # Copy newly built portable package
+          cp build/deskflow*portable.7z artifacts-out/deskflow-after-fix-portable.7z
+          ls -la artifacts-out
+
+      - name: Fetch Master Portable (Official Pre-release)
+        if: ${{ !inputs.build_master_from_source }}
+        shell: bash
+        run: |
+          echo "Downloading official continuous portable build (matches upstream master 49e6293a)..."
+          gh release download continuous --repo deskflow/deskflow --pattern "*win-x64-portable*" --dir temp-master
+          mv temp-master/deskflow*portable.7z artifacts-out/deskflow-before-fix-master-portable.7z
+          rm -rf temp-master
+          ls -la artifacts-out
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Master from Source (Optional)
+        if: ${{ inputs.build_master_from_source }}
+        shell: bash
+        run: |
+          echo "Building master from source..."
+          git fetch origin master:master
+          git checkout master
+          rm -rf build
+          ${{ env.CMAKE_CONFIGURE }} -G Ninja ${{ steps.get-deps.outputs.vcpkg-cmake-config }} -DPACKAGE_VERSION_LABEL="${{ env.DESKFLOW_PACKAGE_VERSION }}"
+          cmake --build build --config Release -j8 --target package
+          cp build/deskflow*portable.7z artifacts-out/deskflow-before-fix-master-portable.7z
+
+      - name: Upload Both Portable Versions (Comparison Bundle)
+        uses: actions/upload-artifact@v7
+        with:
+          name: deskflow-portable-comparison-win-x64
+          path: artifacts-out/*.7z
+
+      - name: Upload Fixed Version Only
+        uses: actions/upload-artifact@v7
+        with:
+          name: deskflow-portable-after-fix-win-x64
+          path: artifacts-out/deskflow-after-fix-portable.7z
+
+      - name: Upload Master Version Only
+        uses: actions/upload-artifact@v7
+        with:
+          name: deskflow-portable-before-fix-win-x64
+          path: artifacts-out/deskflow-before-fix-master-portable.7z
